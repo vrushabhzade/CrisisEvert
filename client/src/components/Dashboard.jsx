@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import io from 'socket.io-client';
-import { GoogleMap, useJsApiLoader, Marker, Circle } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, Marker, Circle, Polyline, InfoWindow } from '@react-google-maps/api';
 import { Activity, ShieldAlert, Wind, CloudRain, MessageSquare, Map as MapIcon, Target, Brain, Radio, CheckCircle, FileText, Zap, Bell, Volume2, VolumeX, Mic, MicOff } from 'lucide-react';
 import ResponseConsole from './ResponseConsole';
+import LayerControl from './LayerControl';
+import TimelineSlider from './TimelineSlider';
 
 const socket = io('http://localhost:3005');
 // Production: const socket = io('https://crisisavert-backend.onrender.com');
@@ -218,6 +220,16 @@ export default function Dashboard() {
     const [isMuted, setIsMuted] = useState(false); // Voice Control
     const [isListening, setIsListening] = useState(false); // STT State
 
+    // Multi-layer map state
+    const [layers, setLayers] = useState({
+        threat: true,
+        shelters: true,
+        routes: false
+    });
+    const [phaseHistory, setPhaseHistory] = useState([]);
+    const [timelineIndex, setTimelineIndex] = useState(0);
+    const [selectedShelter, setSelectedShelter] = useState(null);
+
     // Only load Google Maps in development (localhost)
     const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
 
@@ -236,6 +248,14 @@ export default function Dashboard() {
         socket.on('oracle-stream', (data) => {
             setLatestData(data);
             setDataHistory(prev => [data, ...prev].slice(0, 20)); // Keep last 20 for feed
+
+            // Track phase history for timeline
+            setPhaseHistory(prev => {
+                const updated = [...prev, data];
+                if (updated.length > 10) updated.shift(); // Keep last 10
+                setTimelineIndex(updated.length - 1); // Auto-advance to latest
+                return updated;
+            });
         });
 
         // Listen for High-Priority Alerts
@@ -473,20 +493,29 @@ export default function Dashboard() {
                                 zoom={latestData?.phase?.includes('MONITORING') ? 5 : 9}
                                 options={MAP_OPTIONS}
                             >
-                                {latestData?.content?.threat && (
+                                {/* Threat Zone (if layer enabled) */}
+                                {layers.threat && latestData?.content?.threat && (
                                     <>
                                         <Marker
                                             position={activeThreatLocation}
                                             animation={window.google?.maps?.Animation?.BOUNCE}
+                                            icon={{
+                                                path: window.google?.maps?.SymbolPath?.CIRCLE,
+                                                scale: 12,
+                                                fillColor: latestData.severityColor || '#ef4444',
+                                                fillOpacity: 1,
+                                                strokeColor: '#ffffff',
+                                                strokeWeight: 2
+                                            }}
                                         />
                                         {activeThreatRadius > 0 && (
                                             <Circle
                                                 center={activeThreatLocation}
                                                 radius={activeThreatRadius}
                                                 options={{
-                                                    fillColor: '#ef4444',
+                                                    fillColor: latestData.severityColor || '#ef4444',
                                                     fillOpacity: 0.3,
-                                                    strokeColor: '#ef4444',
+                                                    strokeColor: latestData.severityColor || '#ef4444',
                                                     strokeOpacity: 0.8,
                                                     strokeWeight: 2,
                                                 }}
@@ -494,6 +523,70 @@ export default function Dashboard() {
                                         )}
                                     </>
                                 )}
+
+                                {/* Shelter Markers (if layer enabled) */}
+                                {layers.shelters && latestData?.shelters?.map(shelter => (
+                                    <Marker
+                                        key={shelter.id}
+                                        position={{ lat: shelter.lat, lng: shelter.lon }}
+                                        icon={{
+                                            url: 'data:image/svg+xml;base64,' + btoa(`
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2">
+                                                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                                                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                                                </svg>
+                                            `),
+                                            scaledSize: new window.google.maps.Size(24, 24)
+                                        }}
+                                        onClick={() => setSelectedShelter(shelter)}
+                                    />
+                                ))}
+
+                                {/* Shelter Info Window */}
+                                {selectedShelter && (
+                                    <InfoWindow
+                                        position={{ lat: selectedShelter.lat, lng: selectedShelter.lon }}
+                                        onCloseClick={() => setSelectedShelter(null)}
+                                    >
+                                        <div className="p-2 text-black">
+                                            <h3 className="font-bold text-sm mb-1">{selectedShelter.name}</h3>
+                                            <p className="text-xs text-gray-600 mb-2">{selectedShelter.distance?.toFixed(1)} km away</p>
+                                            <div className="text-xs space-y-1">
+                                                <div className="flex justify-between">
+                                                    <span>Capacity:</span>
+                                                    <span className="font-semibold">{selectedShelter.available}/{selectedShelter.capacity}</span>
+                                                </div>
+                                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                                    <div
+                                                        className="bg-blue-500 h-2 rounded-full"
+                                                        style={{ width: `${(selectedShelter.current / selectedShelter.capacity) * 100}%` }}
+                                                    ></div>
+                                                </div>
+                                                <div className="flex gap-2 mt-2">
+                                                    {selectedShelter.petFriendly && <span className="bg-green-100 text-green-800 px-1 rounded text-[10px]">🐕 Pets OK</span>}
+                                                    {selectedShelter.accessible && <span className="bg-blue-100 text-blue-800 px-1 rounded text-[10px]">♿ Accessible</span>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </InfoWindow>
+                                )}
+
+                                {/* Evacuation Routes (if layer enabled) */}
+                                {layers.routes && latestData?.evacuationRoutes?.map((route, idx) => (
+                                    <Polyline
+                                        key={idx}
+                                        path={route.coordinates.map(c => ({ lat: c.lat, lng: c.lon }))}
+                                        options={{
+                                            strokeColor: route.status === 'open' ? '#10b981' : route.status === 'congested' ? '#f59e0b' : '#ef4444',
+                                            strokeOpacity: 0.8,
+                                            strokeWeight: 3,
+                                            icons: [{
+                                                icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW },
+                                                offset: '100%'
+                                            }]
+                                        }}
+                                    />
+                                ))}
                             </GoogleMap>
                         ) : (
                             <div className="flex items-center justify-center h-full text-crisis-accent animate-pulse">
@@ -507,6 +600,26 @@ export default function Dashboard() {
                                 <p className="text-xs text-gray-400">CURRENT OPERATION</p>
                                 <p className="font-bold text-white">{latestData.phase}</p>
                             </div>
+                        )}
+
+                        {/* Layer Control (development only) */}
+                        {isDevelopment && isLoaded && (
+                            <LayerControl
+                                layers={layers}
+                                onToggle={(layerId) => setLayers(prev => ({ ...prev, [layerId]: !prev[layerId] }))}
+                            />
+                        )}
+
+                        {/* Timeline Slider (development only) */}
+                        {isDevelopment && isLoaded && phaseHistory.length > 1 && (
+                            <TimelineSlider
+                                phaseHistory={phaseHistory}
+                                currentIndex={timelineIndex}
+                                onSeek={(index) => {
+                                    setTimelineIndex(index);
+                                    setLatestData(phaseHistory[index]);
+                                }}
+                            />
                         )}
                     </div>
                 </div>

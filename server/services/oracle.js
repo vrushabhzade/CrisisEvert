@@ -2,6 +2,7 @@
 // Generates data corresponding to the 5 Operational Phases
 
 const { assessSituation, planResponse } = require('./llmService');
+const { findNearestShelters, getSheltersInRegion } = require('../data/shelterData');
 
 const PHASES = {
     MONITORING: 'PHASE 1: DETECTION & MONITORING',
@@ -27,6 +28,16 @@ let reasoningLog = []; // Stores AI thought process
 let forcedThreatType = null; // For Threat Injection
 let generatedPlan = null; // Store LLM plan
 let alertSent = false; // Prevent spamming alerts
+let phaseHistory = []; // Store last 10 phases for timeline
+
+// Severity color mapping
+const SEVERITY_COLORS = {
+    SAFE: '#10b981',      // green-500
+    CAUTION: '#eab308',   // yellow-500
+    WARNING: '#f97316',   // orange-500
+    DANGER: '#ef4444',    // red-500
+    EXTREME: '#000000'    // black
+};
 
 const mcpManager = require('./mcpClient');
 const alertService = require('./alertService');
@@ -261,7 +272,86 @@ async function generateDataChunk() {
             break;
     }
 
+    // Enhance payload with multi-layer data
+    if (currentThreat) {
+        const threatLat = parseFloat(currentThreat.location.coords.split('°')[0]);
+        const threatLon = parseFloat(currentThreat.location.coords.split(',')[1].split('°')[0]);
+
+        // Add severity color
+        payload.severityLevel = getThreatSeverity(currentThreat);
+        payload.severityColor = SEVERITY_COLORS[payload.severityLevel];
+
+        // Find nearby shelters
+        payload.shelters = findNearestShelters(threatLat, threatLon, 10);
+
+        // Generate evacuation routes
+        payload.evacuationRoutes = generateEvacuationRoutes(threatLat, threatLon);
+    }
+
+    // Store in phase history for timeline
+    storePhaseHistory(payload);
+
     return payload;
 }
 
-module.exports = { generateDataChunk, injectThreat };
+// Helper: Get severity level based on threat type
+function getThreatSeverity(threat) {
+    if (!threat) return 'SAFE';
+
+    if (threat.severity === 'EXTREME' || threat.severity === 'CRITICAL') return 'EXTREME';
+    if (threat.severity === 'HIGH') return 'DANGER';
+    if (threat.severity === 'MODERATE') return 'WARNING';
+    if (threat.severity === 'LOW') return 'CAUTION';
+    return 'SAFE';
+}
+
+// Helper: Generate evacuation routes based on threat location
+function generateEvacuationRoutes(threatLat, threatLon) {
+    // Simple mock routes - in production, use routing API
+    const routes = [];
+    const directions = [
+        { name: 'North Route', angle: 0 },
+        { name: 'East Route', angle: 90 },
+        { name: 'South Route', angle: 180 },
+        { name: 'West Route', angle: 270 }
+    ];
+
+    directions.forEach(dir => {
+        const distance = 0.5; // ~50km
+        const radians = (dir.angle * Math.PI) / 180;
+        const endLat = threatLat + (distance * Math.cos(radians));
+        const endLon = threatLon + (distance * Math.sin(radians));
+
+        routes.push({
+            name: dir.name,
+            coordinates: [
+                { lat: threatLat, lon: threatLon },
+                { lat: endLat, lon: endLon }
+            ],
+            status: 'open', // 'open', 'congested', 'closed'
+            distance_km: distance * 111 // rough conversion
+        });
+    });
+
+    return routes;
+}
+
+// Store phase history for timeline
+function storePhaseHistory(payload) {
+    phaseHistory.push({
+        ...payload,
+        timestamp: new Date().toISOString()
+    });
+
+    // Keep only last 10 phases
+    if (phaseHistory.length > 10) {
+        phaseHistory.shift();
+    }
+}
+
+// Get phase history
+function getPhaseHistory() {
+    return phaseHistory;
+}
+
+module.exports = { generateDataChunk, injectThreat, getPhaseHistory };

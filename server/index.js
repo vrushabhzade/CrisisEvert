@@ -59,6 +59,12 @@ io.on('connection', (socket) => {
     });
 });
 
+// API endpoint for phase history (timeline)
+const { getPhaseHistory } = require('./services/oracle');
+app.get('/api/phase-history', (req, res) => {
+    res.json(getPhaseHistory());
+});
+
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
     console.log(`CrisisAvert Oracle Engine active on port ${PORT}`);
