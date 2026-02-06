@@ -3,6 +3,9 @@
 
 const { assessSituation, planResponse } = require('./llmService');
 const { findNearestShelters, getSheltersInRegion } = require('../data/shelterData');
+const weatherService = require('./weatherService');
+const earthquakeService = require('./earthquakeService');
+const predictionService = require('./predictionService');
 
 const PHASES = {
     MONITORING: 'PHASE 1: DETECTION & MONITORING',
@@ -44,6 +47,11 @@ const alertService = require('./alertService');
 
 // PRIVACY MODE: Zero Retention
 const ZERO_RETENTION = process.env.ZERO_RETENTION === 'true';
+
+// REAL-TIME DATA MODE: Use live APIs instead of mock data
+const REAL_DATA_MODE = process.env.REAL_DATA_MODE === 'true';
+let lastAPICheck = 0;
+const API_CHECK_INTERVAL = 10 * 60 * 1000; // 10 minutes
 
 // Mock Data Generators - Still needed for Phase 1 Intel
 function mockSearchForThreats() {
@@ -111,6 +119,47 @@ function injectThreat(type) {
     generatedPlan = null;
 }
 
+// Real-time Threat Detection from Live APIs
+async function detectRealThreats() {
+    const now = Date.now();
+
+    // Rate limiting: Only check APIs every 10 minutes
+    if (now - lastAPICheck < API_CHECK_INTERVAL) {
+        return null;
+    }
+
+    lastAPICheck = now;
+    console.log('🌐 Scanning real-time APIs for threats...');
+
+    try {
+        // Scan weather threats
+        const weatherThreats = await weatherService.scanAllLocations();
+
+        // Scan earthquake threats (magnitude >= 4.0)
+        const earthquakeThreats = await earthquakeService.scanForEarthquakes(4.0);
+
+        // Combine all threats
+        const allThreats = [...weatherThreats, ...earthquakeThreats];
+
+        if (allThreats.length > 0) {
+            // Return the most severe threat
+            const sortedThreats = allThreats.sort((a, b) => {
+                const severityOrder = { 'EXTREME': 5, 'CRITICAL': 4, 'HIGH': 3, 'MODERATE': 2, 'LOW': 1 };
+                return (severityOrder[b.severity] || 0) - (severityOrder[a.severity] || 0);
+            });
+
+            console.log(`✅ Found ${allThreats.length} real threat(s). Using: ${sortedThreats[0].name}`);
+            return sortedThreats[0];
+        }
+
+        console.log('✅ No active threats detected from real-time data.');
+        return null;
+    } catch (error) {
+        console.error('❌ Real-time threat detection failed:', error.message);
+        return null;
+    }
+}
+
 async function generateDataChunk() {
     simulationStep++;
 
@@ -137,8 +186,23 @@ async function generateDataChunk() {
 
     // Dynamic State Updates
     if (currentPhase === PHASES.MONITORING && simulationStep === 4) {
-        // "Find" Intel
-        intelFeed = mockSearchForThreats();
+        // Real-time or Mock Intel
+        if (REAL_DATA_MODE) {
+            const realThreat = await detectRealThreats();
+            if (realThreat) {
+                // Auto-trigger assessment with real threat
+                currentThreat = realThreat;
+                currentPhase = PHASES.ASSESSMENT;
+                simulationStep = 6; // Jump to assessment
+                intelFeed = [
+                    { source: 'LIVE API', title: `${realThreat.type} detected: ${realThreat.name}`, time: 'NOW' }
+                ];
+            } else {
+                intelFeed = mockSearchForThreats();
+            }
+        } else {
+            intelFeed = mockSearchForThreats();
+        }
     }
 
     if (currentPhase === PHASES.ASSESSMENT) {
@@ -284,9 +348,7 @@ async function generateDataChunk() {
         // Find nearby shelters
         payload.shelters = findNearestShelters(threatLat, threatLon, 10);
 
-        // Generate evacuation routes
-        payload.evacuationRoutes = generateEvacuationRoutes(threatLat, threatLon);
-    }
+        // Generate evacuation routes`r`n        payload.evacuationRoutes = generateEvacuationRoutes(threatLat, threatLon);`r`n        `r`n        // Add to prediction service history`r`n        predictionService.addDataPoint(currentThreat);`r`n        `r`n        // Get predictions (T+6h, T+12h, T+24h)`r`n        const predictions = predictionService.getPredictionSummary(currentThreat);`r`n        if (predictions) {`r`n            payload.predictions = predictions;`r`n        }`r`n    }`r`n    `r`n    // Add real-time mode indicator`r`n    payload.dataMode = REAL_DATA_MODE ? 'LIVE' : 'SIMULATION';`r`n    payload.lastAPICheck = REAL_DATA_MODE ? new Date(lastAPICheck).toISOString() : null;
 
     // Store in phase history for timeline
     storePhaseHistory(payload);
@@ -355,3 +417,4 @@ function getPhaseHistory() {
 }
 
 module.exports = { generateDataChunk, injectThreat, getPhaseHistory };
+
