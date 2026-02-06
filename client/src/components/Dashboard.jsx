@@ -5,6 +5,8 @@ import { Activity, ShieldAlert, Wind, CloudRain, MessageSquare, Map as MapIcon, 
 import ResponseConsole from './ResponseConsole';
 
 const socket = io('http://localhost:3005');
+// Production: const socket = io('https://crisisavert-backend.onrender.com');
+
 
 const MAP_CONTAINER_STYLE = {
     width: '100%',
@@ -216,9 +218,13 @@ export default function Dashboard() {
     const [isMuted, setIsMuted] = useState(false); // Voice Control
     const [isListening, setIsListening] = useState(false); // STT State
 
+    // Only load Google Maps in development (localhost)
+    const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
+
     const { isLoaded } = useJsApiLoader({
         id: 'google-map-script',
-        googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY
+        googleMapsApiKey: isDevelopment ? import.meta.env.VITE_GOOGLE_MAPS_API_KEY : '',
+        skipLoading: !isDevelopment // Skip loading in production
     });
 
     useEffect(() => {
@@ -449,7 +455,18 @@ export default function Dashboard() {
                 {/* Map / Visualization Column */}
                 <div className="lg:col-span-2 flex flex-col">
                     <div className="glass-panel flex-1 min-h-[500px] rounded-xl relative overflow-hidden group border-crisis-accent/20">
-                        {isLoaded ? (
+                        {!isDevelopment ? (
+                            // Production: Show placeholder instead of map
+                            <div className="flex flex-col items-center justify-center h-full text-center p-8">
+                                <MapIcon size={64} className="text-crisis-accent/30 mb-4" />
+                                <h3 className="text-xl font-bold text-white mb-2">Map Visualization</h3>
+                                <p className="text-gray-400 text-sm max-w-md">
+                                    Interactive map is available in development mode only.
+                                    <br />
+                                    Threat locations and impact zones are visualized here during local testing.
+                                </p>
+                            </div>
+                        ) : isLoaded ? (
                             <GoogleMap
                                 mapContainerStyle={MAP_CONTAINER_STYLE}
                                 center={activeThreatLocation}
