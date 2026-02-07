@@ -348,7 +348,22 @@ async function generateDataChunk() {
         // Find nearby shelters
         payload.shelters = findNearestShelters(threatLat, threatLon, 10);
 
-        // Generate evacuation routes`r`n        payload.evacuationRoutes = generateEvacuationRoutes(threatLat, threatLon);`r`n        `r`n        // Add to prediction service history`r`n        predictionService.addDataPoint(currentThreat);`r`n        `r`n        // Get predictions (T+6h, T+12h, T+24h)`r`n        const predictions = predictionService.getPredictionSummary(currentThreat);`r`n        if (predictions) {`r`n            payload.predictions = predictions;`r`n        }`r`n    }`r`n    `r`n    // Add real-time mode indicator`r`n    payload.dataMode = REAL_DATA_MODE ? 'LIVE' : 'SIMULATION';`r`n    payload.lastAPICheck = REAL_DATA_MODE ? new Date(lastAPICheck).toISOString() : null;
+        // Generate evacuation routes
+        payload.evacuationRoutes = generateEvacuationRoutes(threatLat, threatLon);
+
+        // Add to prediction service history
+        predictionService.addDataPoint(currentThreat);
+
+        // Get predictions (T+6h, T+12h, T+24h)
+        const predictions = predictionService.getPredictionSummary(currentThreat);
+        if (predictions) {
+            payload.predictions = predictions;
+        }
+    }
+
+    // Add real-time mode indicator
+    payload.dataMode = REAL_DATA_MODE ? 'LIVE' : 'SIMULATION';
+    payload.lastAPICheck = REAL_DATA_MODE ? new Date(lastAPICheck).toISOString() : null;
 
     // Store in phase history for timeline
     storePhaseHistory(payload);

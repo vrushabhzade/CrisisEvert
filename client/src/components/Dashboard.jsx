@@ -1,10 +1,13 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import io from 'socket.io-client';
 import { GoogleMap, useJsApiLoader, Marker, Circle, Polyline, InfoWindow } from '@react-google-maps/api';
-import { Activity, ShieldAlert, Wind, CloudRain, MessageSquare, Map as MapIcon, Target, Brain, Radio, CheckCircle, FileText, Zap, Bell, Volume2, VolumeX, Mic, MicOff } from 'lucide-react';
+import { Activity, ShieldAlert, Wind, CloudRain, MessageSquare, Map as MapIcon, Target, Brain, Radio, CheckCircle, FileText, Zap, Bell, Volume2, VolumeX, Mic, MicOff, User, LogOut } from 'lucide-react';
 import ResponseConsole from './ResponseConsole';
 import LayerControl from './LayerControl';
 import TimelineSlider from './TimelineSlider';
+import { useAuth } from '../context/AuthContext';
+import LoginModal from './LoginModal';
+import UserStatusPanel from './UserStatusPanel';
 
 const socket = io('http://localhost:3005');
 // Production: const socket = io('https://crisisavert-backend.onrender.com');
@@ -51,6 +54,8 @@ const PhaseDisplay = ({ currentPhase }) => {
                     </div>
                 );
             })}
+            {/* Login Modal */}
+            <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} />
         </div>
     );
 };
@@ -215,8 +220,13 @@ export default function Dashboard() {
 
     const [latestData, setLatestData] = useState(null);
     const [dataHistory, setDataHistory] = useState([]);
-    const [status, setStatus] = useState('OFFLINE');
-    const [alerts, setAlerts] = useState([]);
+    const [status, setStatus] = useState('CONNECTING...');
+
+    // Auth State
+    const { user, logout } = useAuth();
+    const [isLoginOpen, setIsLoginOpen] = useState(false);
+
+    // Audio Staterts, setAlerts] = useState([]);
     const [isMuted, setIsMuted] = useState(false); // Voice Control
     const [isListening, setIsListening] = useState(false); // STT State
 
@@ -404,6 +414,16 @@ export default function Dashboard() {
                         <span className={`h-2 w-2 rounded-full ${status === 'ONLINE' ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-red-500'} animate-ping`}></span>
                         <span className="text-xs font-mono text-gray-400">{status}</span>
                     </div>
+
+                    {/* User Auth Button */}
+                    <button
+                        onClick={() => user ? logout() : setIsLoginOpen(true)}
+                        className={`p-2 rounded-full transition-colors ${user ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'bg-crisis-accent/10 text-crisis-accent hover:bg-crisis-accent/20'}`}
+                        title={user ? "Sign Out" : "Sign In"}
+                    >
+                        {user ? <LogOut size={18} /> : <User size={18} />}
+                    </button>
+
                 </div>
             </header>
 
@@ -415,6 +435,10 @@ export default function Dashboard() {
 
                 {/* Left Column: Context & Analysis */}
                 <div className="lg:col-span-1 flex flex-col space-y-6">
+
+                    {/* User Status Panel */}
+                    <UserStatusPanel currentThreat={latestData?.content?.threat} />
+
                     {/* Live Phase Content */}
                     <PhaseContent data={latestData} />
 

@@ -27,9 +27,56 @@ app.get('/', (req, res) => {
 const { generateDataChunk, injectThreat } = require('./services/oracle');
 const mcpManager = require('./services/mcpClient');
 const alertService = require('./services/alertService');
+const authService = require('./services/authService');
+const userService = require('./services/userService');
 
 // Initialize MCP
 mcpManager.init();
+
+// --- AUTHENTICATION ROUTES ---
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const result = await authService.registerUser(req.body);
+        res.json(result);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        const result = await authService.loginUser(email, password);
+        res.json(result);
+    } catch (err) {
+        res.status(401).json({ error: err.message });
+    }
+});
+
+// --- USER SAFETY ROUTES ---
+app.post('/api/user/status', authService.authenticateToken, (req, res) => {
+    try {
+        const { status, location } = req.body;
+        const updatedUser = userService.updateUserStatus(req.user.id, status, location);
+        res.json(updatedUser);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+app.post('/api/user/risk', authService.authenticateToken, async (req, res) => {
+    try {
+        const { location } = req.body;
+        // In a real app, we'd fetch active threats from a shared state or DB
+        // For now, we'll ask the Oracle for the latest threat if available
+        // This is a simplified integration point
+        const activeThreats = []; // This would need to be connected to the Oracle's current state
+        const risk = userService.calculateUserRisk(location, activeThreats);
+        res.json(risk);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
 
 io.on('connection', (socket) => {
     console.log('Oracle Interface Connected:', socket.id);
